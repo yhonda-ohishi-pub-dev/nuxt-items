@@ -1,0 +1,24 @@
+name = "nuxt-items"
+compatibility_date = "2024-09-19"
+compatibility_flags = ["nodejs_compat"]
+main = "./.output/server/index.mjs"
+assets = { directory = "./.output/public/", binding = "ASSETS" }
+
+[build]
+command = "npm run build"
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[[services]]
+binding = "GRPC_PROXY_SERVICE"
+service = "cf-grpc-proxy"
+
+[[routes]]
+pattern = "items.mtamaramu.com"
+custom_domain = true
+
+[vars]
+NUXT_PUBLIC_AUTH_WORKER_URL = "https://auth.mtamaramu.com"
+NUXT_PUBLIC_SYNC_URL = "wss://sync.mtamaramu.com"
