@@ -31,7 +31,14 @@ export default defineEventHandler((event) => {
   if (url.searchParams.has('lw_callback')) return
 
   // redirect_uri に lw_callback マーカー付与（リダイレクトループ防止）
-  const redirectUri = `${url.origin}/?lw_callback=1`
+  // share_target のクエリパラメータ (?url=, ?text=, ?title=) を保持
+  const preservedParams = new URLSearchParams()
+  for (const key of ['url', 'text', 'title']) {
+    const val = url.searchParams.get(key)
+    if (val) preservedParams.set(key, val)
+  }
+  preservedParams.set('lw_callback', '1')
+  const redirectUri = `${url.origin}/?${preservedParams.toString()}`
 
   // ?lw=<domain> パラメータ — LINE WORKS 自動ログイン（Bot リンク/ブックマーク）
   const lwDomain = url.searchParams.get('lw')

@@ -1,6 +1,6 @@
 <template>
-  <UModal v-model="isOpen" @close="close">
-    <UCard>
+  <UModal v-model="isOpen" :fullscreen="isMobile" @close="close">
+    <UCard :ui="{ body: { base: 'overflow-y-auto max-h-[calc(100vh-8rem)]' } }">
       <template #header>
         <div class="flex items-center justify-between">
           <h3 class="text-lg font-semibold">バーコードスキャン</h3>
@@ -9,7 +9,7 @@
       </template>
 
       <!-- カメラビュー -->
-      <div id="barcode-reader" class="w-full overflow-hidden rounded-lg" />
+      <div id="barcode-reader" class="barcode-reader-container w-full overflow-hidden rounded-lg" />
 
       <p v-if="lastResult" class="mt-3 text-center text-sm font-medium text-green-600">
         検出: {{ lastResult }}
@@ -42,6 +42,8 @@ const emit = defineEmits<{
   scanned: [code: string]
 }>()
 
+const isMobile = useMediaQuery('(max-width: 640px)')
+
 const isOpen = computed({
   get: () => props.modelValue,
   set: (v) => emit('update:modelValue', v),
@@ -69,11 +71,15 @@ async function startScanner() {
     const { Html5Qrcode } = await import('html5-qrcode')
     html5QrCode = new Html5Qrcode('barcode-reader')
 
+    const qrboxSize = isMobile.value
+      ? { width: 200, height: 120 }
+      : { width: 250, height: 150 }
+
     await html5QrCode.start(
       { facingMode: 'environment' },
       {
         fps: 10,
-        qrbox: { width: 250, height: 150 },
+        qrbox: qrboxSize,
         aspectRatio: 1.0,
       },
       (decodedText: string) => {
@@ -120,3 +126,24 @@ onUnmounted(() => {
   stopScanner()
 })
 </script>
+
+<style scoped>
+.barcode-reader-container {
+  max-height: 45vh !important;
+}
+.barcode-reader-container :deep(video) {
+  max-height: 45vh !important;
+  width: 100% !important;
+  object-fit: cover !important;
+}
+.barcode-reader-container :deep(#barcode-reader__scan_region) {
+  max-height: 45vh !important;
+  overflow: hidden !important;
+}
+.barcode-reader-container :deep(#barcode-reader__scan_region > img) {
+  display: none !important;
+}
+.barcode-reader-container :deep(#barcode-reader__dashboard_section) {
+  display: none !important;
+}
+</style>

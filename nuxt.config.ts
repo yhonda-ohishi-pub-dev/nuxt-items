@@ -56,6 +56,7 @@ export default defineNuxtConfig({
   app: {
     head: {
       meta: [
+        { name: 'viewport', content: 'width=device-width, initial-scale=1, maximum-scale=1' },
         { name: 'theme-color', content: '#4A90D9' },
       ],
       link: [
@@ -83,6 +84,15 @@ export default defineNuxtConfig({
         { src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png' },
         { src: 'maskable-icon-512x512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
       ],
+      share_target: {
+        action: '/',
+        method: 'GET',
+        params: {
+          title: 'title',
+          text: 'text',
+          url: 'url',
+        },
+      },
     },
     workbox: {
       navigateFallback: null,

@@ -1,19 +1,19 @@
 <template>
-  <div class="max-w-4xl mx-auto p-4">
+  <div class="max-w-4xl mx-auto p-2 sm:p-4 overflow-x-hidden">
     <!-- ヘッダー -->
-    <div class="flex items-center justify-between mb-4">
-      <div class="flex items-center gap-2">
-        <h1 class="text-xl font-bold">物品管理</h1>
+    <div class="flex items-center justify-between mb-3 sm:mb-4 gap-1 sm:gap-2 flex-wrap">
+      <div class="flex items-center gap-1">
+        <h1 class="text-lg sm:text-xl font-bold whitespace-nowrap">物品管理</h1>
         <span
           :class="syncConnected ? 'bg-green-400' : 'bg-gray-300'"
-          class="w-2 h-2 rounded-full inline-block"
+          class="w-2 h-2 rounded-full inline-block flex-shrink-0"
           :title="syncConnected ? '同期中' : '再接続中...'"
         />
       </div>
-      <div class="flex items-center gap-2">
-        <AuthToolbar :show-copy-url="false" :show-settings="false" :show-logout="false" />
+      <div class="flex items-center gap-1 sm:gap-2 flex-wrap min-w-0">
+        <AuthToolbar :show-copy-url="false" :show-settings="false" :show-logout="false" :show-qr="!isMobile" />
         <ItemsOwnerTypeToggle v-model="ownerType" @update:model-value="onOwnerTypeChange" />
-        <AuthToolbar :show-user-info="false" />
+        <AuthToolbar :show-user-info="false" :show-qr="!isMobile" />
       </div>
     </div>
 
@@ -26,11 +26,13 @@
       />
     </div>
 
-    <!-- バーコード検索 -->
+    <!-- バーコード検索 + NFCスキャン -->
     <div class="mb-4">
       <ItemsBarcodeSearch
         @search="onBarcodeSearch"
         @clear="onSearchClear"
+        @nfc-scanned="onNfcScanned"
+        @url-search="onUrlSearch"
       />
     </div>
 
@@ -105,24 +107,46 @@
       :items="displayItems"
       :loading="status === 'pending'"
       @navigate="navigateToChild"
+      @select="onSelect"
       @edit="onEdit"
       @delete="onDelete"
+      @nfc-write="onNfcWrite"
     />
 
     <!-- 作成/編集モーダル -->
-    <UModal v-model="showForm">
+    <UModal v-model="showForm" :fullscreen="isMobile">
       <ItemsItemForm
         :item="editingItem"
         :parent-id="currentParentId"
         :default-owner-type="ownerType || 'org'"
         :initial-barcode="pendingBarcode"
+        :initial-product="pendingAmazonProduct"
         @submit="onSubmitForm"
         @cancel="showForm = false"
       />
     </UModal>
 
+    <!-- NFC書き込み -->
+    <ItemsNfcWriter
+      v-if="nfcWriteItem"
+      v-model="showNfcWriter"
+      :item-id="nfcWriteItem.id"
+      :item-name="nfcWriteItem.name"
+    />
+
+    <!-- 詳細表示モーダル -->
+    <UModal v-model="showDetail" :fullscreen="isMobile">
+      <ItemsItemDetail
+        v-if="detailItem"
+        :item="detailItem"
+        @close="showDetail = false"
+        @edit="onDetailEdit"
+        @change-ownership="onChangeOwnership"
+      />
+    </UModal>
+
     <!-- 削除確認 -->
-    <UModal v-model="showDeleteConfirm">
+    <UModal v-model="showDeleteConfirm" :fullscreen="isMobile">
       <UCard>
         <template #header>
           <h3 class="text-lg font-semibold text-red-600">削除確認</h3>
@@ -145,10 +169,12 @@
 
 <script setup lang="ts">
 import type { Item } from '@yhonda-ohishi-pub-dev/logi-proto'
+import type { InitialProduct } from '~/components/items/ItemForm.vue'
 import { AuthToolbar, useAuth } from '@yhonda-ohishi-pub-dev/auth-client'
 
 const { setOwnerType: setAuthOwnerType } = useAuth()
-const { status: lookupStatus, product: externalProduct, lookup, reset: resetLookup } = useProductLookup()
+const isMobile = useMediaQuery('(max-width: 640px)')
+const { status: lookupStatus, product: externalProduct, lookup, lookupByUrl, reset: resetLookup } = useProductLookup()
 
 const {
   items,
@@ -162,7 +188,9 @@ const {
   createItem,
   updateItem,
   deleteItem,
+  changeOwnership,
   searchByBarcode,
+  getItem,
   navigateToChild,
   navigateToRoot,
   navigateToBreadcrumb,
@@ -179,20 +207,54 @@ const showDeleteConfirm = ref(false)
 const deletingItem = ref<Item | null>(null)
 const deleting = ref(false)
 
+// 詳細表示状態
+const showDetail = ref(false)
+const detailItem = ref<Item | null>(null)
+
+// NFC書き込み状態
+const showNfcWriter = ref(false)
+const nfcWriteItem = ref<Item | null>(null)
+
 // 検索状態
 const searchMode = ref(false)
 const searchResults = ref<Item[]>([])
 const lastSearchBarcode = ref('')
 const pendingBarcode = ref('')
+const pendingAmazonProduct = ref<InitialProduct | null>(null)
 
 const displayItems = computed(() =>
   searchMode.value ? searchResults.value : items.value
 )
 
-// 初回読み込み + WebSocket同期開始
-onMounted(() => {
+// 初回読み込み + WebSocket同期開始 + ?nfc= パラメータ処理
+onMounted(async () => {
   fetchItems()
   initSync()
+
+  // ?nfc=UUID パラメータがあればアイテムを表示
+  const route = useRoute()
+  const nfcItemId = route.query.nfc as string | undefined
+  if (nfcItemId) {
+    const item = await getItem(nfcItemId)
+    if (item) {
+      editingItem.value = item
+      showForm.value = true
+    }
+    // URLからパラメータを削除
+    navigateTo({ query: {} }, { replace: true })
+    return
+  }
+
+  // ?url= or ?text= パラメータ（Web Share Target / Amazon URL共有）
+  const sharedUrl = route.query.url as string | undefined
+  const sharedText = route.query.text as string | undefined
+  const sharedTitle = route.query.title as string | undefined
+  const amazonUrl = extractAmazonUrl(sharedUrl, sharedText)
+  if (amazonUrl) {
+    navigateTo({ query: {} }, { replace: true })
+    const nameFromShare = extractNameFromShareText(sharedText, sharedTitle)
+    await openCreateFormWithAmazonUrl(amazonUrl, nameFromShare)
+  }
 })
 
 function onOwnerTypeChange(type: string) {
@@ -201,9 +263,61 @@ function onOwnerTypeChange(type: string) {
   setAuthOwnerType(type)
 }
 
+// Amazon URL 判定・抽出
+function isAmazonLikeUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    return /^(www\.)?amazon\.(co\.jp|jp|com|co\.uk|de|fr|it|es|ca)$/.test(parsed.hostname)
+      || parsed.hostname === 'amzn.asia'
+      || parsed.hostname === 'amzn.to'
+  } catch {
+    return false
+  }
+}
+
+function extractAmazonUrl(url?: string, text?: string): string | null {
+  if (url && isAmazonLikeUrl(url)) return url
+  if (text) {
+    const urlMatch = text.match(/(https?:\/\/(?:www\.)?(?:amazon\.[\w.]+|amzn\.(?:asia|to))\S*)/i)
+    if (urlMatch) return urlMatch[1]
+  }
+  return null
+}
+
+/** 共有テキストから商品名を抽出（URL部分を除去） */
+function extractNameFromShareText(text?: string, title?: string): string {
+  // Amazon の汎用 title（"Amazon.comでご覧ください" 等）は無視
+  const isGenericTitle = title && /^Amazon[\s.]/.test(title.trim())
+  if (title?.trim() && !isGenericTitle) return title.trim()
+  if (!text) return ''
+  // テキストからURLを除去して残りを商品名として使用
+  const name = text.replace(/https?:\/\/\S+/gi, '').trim()
+  return name
+}
+
+async function openCreateFormWithAmazonUrl(url: string, title?: string) {
+  editingItem.value = null
+  searchMode.value = false
+  searchResults.value = []
+  pendingBarcode.value = ''
+  pendingAmazonProduct.value = { loading: true, url }
+  showForm.value = true
+
+  const result = await lookupByUrl(url)
+  const finalProduct = {
+    loading: false,
+    url,
+    name: result?.name || title || '',
+    imageUrl: result?.imageUrl || '',
+    description: result?.description || '',
+  }
+  pendingAmazonProduct.value = finalProduct
+}
+
 function openCreateForm() {
   editingItem.value = null
   pendingBarcode.value = ''
+  pendingAmazonProduct.value = null
   showForm.value = true
 }
 
@@ -212,7 +326,42 @@ function openCreateFormWithBarcode(barcode: string) {
   searchMode.value = false
   searchResults.value = []
   pendingBarcode.value = barcode
+  pendingAmazonProduct.value = null
   showForm.value = true
+}
+
+async function onChangeOwnership(item: Item, newOwnerType: string) {
+  console.log('[ChangeOwnership] called:', item.id, newOwnerType)
+  try {
+    await changeOwnership(item.id, newOwnerType)
+    console.log('[ChangeOwnership] success')
+    showDetail.value = false
+    const toast = useToast()
+    toast.add({
+      title: newOwnerType === 'personal' ? '個人に移動しました' : '組織に移動しました',
+      icon: 'i-heroicons-check-circle',
+      color: 'green',
+    })
+  } catch (e: any) {
+    console.error('[ChangeOwnership] error:', e)
+    const toast = useToast()
+    toast.add({
+      title: '移動に失敗しました',
+      description: e.message || 'エラーが発生しました',
+      icon: 'i-heroicons-exclamation-triangle',
+      color: 'red',
+    })
+  }
+}
+
+function onSelect(item: Item) {
+  detailItem.value = item
+  showDetail.value = true
+}
+
+function onDetailEdit(item: Item) {
+  showDetail.value = false
+  onEdit(item)
 }
 
 function onEdit(item: Item) {
@@ -262,6 +411,10 @@ async function confirmDelete() {
   }
 }
 
+async function onUrlSearch(url: string) {
+  await openCreateFormWithAmazonUrl(url)
+}
+
 async function onBarcodeSearch(barcode: string) {
   lastSearchBarcode.value = barcode
   resetLookup()
@@ -281,5 +434,19 @@ function onSearchClear() {
   searchMode.value = false
   searchResults.value = []
   resetLookup()
+}
+
+// NFC
+function onNfcWrite(item: Item) {
+  nfcWriteItem.value = item
+  showNfcWriter.value = true
+}
+
+async function onNfcScanned(itemId: string) {
+  const item = await getItem(itemId)
+  if (item) {
+    editingItem.value = item
+    showForm.value = true
+  }
 }
 </script>

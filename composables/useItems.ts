@@ -46,6 +46,7 @@ export function useItems() {
     category?: string
     description?: string
     imageUrl?: string
+    url?: string
     quantity?: number
   }) {
     const effectiveParentId = data.parentId ?? currentParentId.value
@@ -58,6 +59,7 @@ export function useItems() {
       category: data.category ?? '',
       description: data.description ?? '',
       imageUrl: data.imageUrl ?? '',
+      url: data.url ?? '',
       quantity: data.quantity ?? 1,
     })
     await fetchItems()
@@ -70,6 +72,7 @@ export function useItems() {
     category?: string
     description?: string
     imageUrl?: string
+    url?: string
     quantity?: number
   }) {
     await $grpc.items.updateItem({
@@ -79,6 +82,7 @@ export function useItems() {
       category: data.category ?? '',
       description: data.description ?? '',
       imageUrl: data.imageUrl ?? '',
+      url: data.url ?? '',
       quantity: data.quantity ?? 1,
     })
     await fetchItems()
@@ -97,9 +101,26 @@ export function useItems() {
     sync.notifyChange('move', currentParentId.value, ownerType.value)
   }
 
+  async function changeOwnership(id: string, newOwnerType: string) {
+    console.log('[changeOwnership] calling RPC:', { id, newOwnerType })
+    await $grpc.items.changeItemOwnership({ id, newOwnerType })
+    console.log('[changeOwnership] RPC success, fetching items')
+    await fetchItems()
+    sync.notifyChange('ownership', currentParentId.value, ownerType.value)
+  }
+
   async function searchByBarcode(barcode: string): Promise<Item[]> {
     const response = await $grpc.items.searchByBarcode({ barcode })
     return response.items
+  }
+
+  async function getItem(id: string): Promise<Item | null> {
+    try {
+      const response = await $grpc.items.getItem({ id })
+      return response.item ?? null
+    } catch {
+      return null
+    }
   }
 
   // 階層ナビゲーション
@@ -157,7 +178,9 @@ export function useItems() {
     updateItem,
     deleteItem,
     moveItem,
+    changeOwnership,
     searchByBarcode,
+    getItem,
     navigateToChild,
     navigateToRoot,
     navigateToBreadcrumb,

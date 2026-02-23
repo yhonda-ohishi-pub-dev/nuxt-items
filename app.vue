@@ -5,5 +5,6 @@
     <ClientOnly>
       <NuxtPage />
     </ClientOnly>
+    <UNotifications />
   </div>
 </template>

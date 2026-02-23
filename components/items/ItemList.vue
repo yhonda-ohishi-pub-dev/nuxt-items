@@ -2,7 +2,7 @@
   <div>
     <UTable
       :rows="items"
-      :columns="columns"
+      :columns="visibleColumns"
       :loading="loading"
       :empty-state="{ icon: 'i-heroicons-cube', label: '物品がありません' }"
       :ui="{ td: { base: 'whitespace-nowrap' } }"
@@ -43,6 +43,15 @@
 
       <template #actions-data="{ row }">
         <div class="flex gap-1" @click.stop>
+          <UButton
+            v-if="isNfcSupported"
+            icon="i-heroicons-signal"
+            size="xs"
+            variant="ghost"
+            color="gray"
+            title="NFCタグに書き込み"
+            @click="$emit('nfc-write', row)"
+          />
           <UButton
             icon="i-heroicons-arrow-right"
             size="xs"
@@ -85,9 +94,15 @@ const emit = defineEmits<{
   navigate: [item: Item]
   edit: [item: Item]
   delete: [item: Item]
+  'nfc-write': [item: Item]
+  select: [item: Item]
 }>()
 
-const columns = [
+const { isSupported: isNfcSupported } = useNfc()
+
+const isMobile = useMediaQuery('(max-width: 640px)')
+
+const allColumns = [
   { key: 'image', label: '' },
   { key: 'name', label: '名前' },
   { key: 'ownerType', label: '種別' },
@@ -96,7 +111,13 @@ const columns = [
   { key: 'actions', label: '' },
 ]
 
+const mobileColumns = ['image', 'name', 'actions']
+
+const visibleColumns = computed(() =>
+  isMobile.value ? allColumns.filter(c => mobileColumns.includes(c.key)) : allColumns
+)
+
 function onRowClick(row: Item) {
-  emit('navigate', row)
+  emit('select', row)
 }
 </script>

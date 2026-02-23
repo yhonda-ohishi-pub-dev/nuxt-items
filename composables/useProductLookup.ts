@@ -2,7 +2,8 @@ export interface ProductInfo {
   name: string
   category: string
   description: string
-  source: 'rakuten' | 'openfoodfacts' | 'openproductsfacts'
+  imageUrl: string
+  source: 'rakuten' | 'openfoodfacts' | 'openproductsfacts' | 'amazon'
 }
 
 export type LookupStatus = 'idle' | 'loading' | 'found' | 'not_found' | 'error'
@@ -22,7 +23,7 @@ async function fetchRakuten(
 ): Promise<ProductInfo | null> {
   const res = await fetch(`/api/barcode-lookup?code=${encodeURIComponent(barcode)}`, { signal })
   if (!res.ok) return null
-  const data = await res.json() as { found: boolean; name?: string; category?: string; description?: string; maker?: string; brand?: string }
+  const data = await res.json() as { found: boolean; name?: string; category?: string; description?: string; maker?: string; brand?: string; imageUrl?: string }
   if (!data.found || !data.name) return null
   const nameParts = [data.brand, data.name].filter(Boolean)
   const name = data.brand && data.name?.includes(data.brand) ? data.name : nameParts.join(' ')
@@ -30,6 +31,7 @@ async function fetchRakuten(
     name,
     category: data.category || '',
     description: data.description || '',
+    imageUrl: data.imageUrl || '',
     source: 'rakuten',
   }
 }
@@ -109,6 +111,7 @@ export function useProductLookup() {
               name: extractName(raw),
               category: extractCategory(raw),
               description: extractDescription(raw),
+              imageUrl: '',
               source: src.source,
             }
             product.value = info
@@ -135,11 +138,57 @@ export function useProductLookup() {
     }
   }
 
+  async function lookupByUrl(url: string): Promise<ProductInfo | null> {
+    if (!url.trim()) return null
+
+    status.value = 'loading'
+    product.value = null
+    errorMessage.value = ''
+
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS)
+
+    try {
+      const res = await fetch(`/api/amazon-lookup?url=${encodeURIComponent(url.trim())}`, {
+        signal: controller.signal,
+      })
+      if (!res.ok) {
+        status.value = 'error'
+        return null
+      }
+      const data = await res.json() as { found: boolean; name?: string; imageUrl?: string; description?: string }
+      if (!data.found || !data.name) {
+        status.value = 'not_found'
+        return null
+      }
+      const info: ProductInfo = {
+        name: data.name,
+        category: '',
+        description: data.description || '',
+        imageUrl: data.imageUrl || '',
+        source: 'amazon',
+      }
+      product.value = info
+      status.value = 'found'
+      return info
+    } catch (e: any) {
+      if (e.name === 'AbortError') {
+        errorMessage.value = 'タイムアウトしました'
+      } else {
+        errorMessage.value = e.message || '不明なエラー'
+      }
+      status.value = 'error'
+      return null
+    } finally {
+      clearTimeout(timeout)
+    }
+  }
+
   function reset() {
     status.value = 'idle'
     product.value = null
     errorMessage.value = ''
   }
 
-  return { status: readonly(status), product: readonly(product), errorMessage: readonly(errorMessage), lookup, reset }
+  return { status: readonly(status), product: readonly(product), errorMessage: readonly(errorMessage), lookup, lookupByUrl, reset }
 }

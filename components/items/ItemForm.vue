@@ -6,7 +6,7 @@
       </h3>
     </template>
 
-    <div class="space-y-4">
+    <div class="space-y-3 sm:space-y-4">
       <UFormGroup label="バーコード">
         <div class="flex gap-2">
           <UInput v-model="form.barcode" placeholder="バーコード（任意）" class="flex-1" @keyup.enter="onBarcodeLookup" />
@@ -66,6 +66,18 @@
         @close="resetLookup"
       />
 
+      <!-- initialProduct ロード中 -->
+      <div v-if="initialProduct?.loading" class="flex items-center gap-2 text-sm text-gray-500">
+        <UIcon name="i-heroicons-arrow-path" class="animate-spin" />
+        商品情報を取得中...
+      </div>
+
+      <!-- Amazon 商品画像プレビュー -->
+      <div v-if="amazonImageUrl" class="flex items-center gap-3">
+        <img :src="amazonImageUrl" class="w-20 h-20 object-contain rounded border" alt="商品画像" />
+        <p class="text-xs text-gray-400">Amazon 商品画像（参考）</p>
+      </div>
+
       <UFormGroup label="名前" required>
         <UInput v-model="form.name" placeholder="物品名を入力" />
       </UFormGroup>
@@ -91,6 +103,10 @@
         <UTextarea v-model="form.description" placeholder="説明（任意）" :rows="2" />
       </UFormGroup>
 
+      <UFormGroup label="URL">
+        <UInput v-model="form.url" placeholder="https://..." type="url" />
+      </UFormGroup>
+
       <UFormGroup label="数量">
         <UInput v-model.number="form.quantity" type="number" :min="0" />
       </UFormGroup>
@@ -112,11 +128,20 @@
 <script setup lang="ts">
 import type { Item } from '@yhonda-ohishi-pub-dev/logi-proto'
 
+export interface InitialProduct {
+  loading: boolean
+  url: string
+  name?: string
+  imageUrl?: string
+  description?: string
+}
+
 const props = defineProps<{
   item?: Item | null
   parentId?: string
   defaultOwnerType?: string
   initialBarcode?: string
+  initialProduct?: InitialProduct | null
 }>()
 
 const emit = defineEmits<{
@@ -127,6 +152,7 @@ const emit = defineEmits<{
     category: string
     description: string
     imageUrl: string
+    url: string
     quantity: number
   }]
   cancel: []
@@ -150,6 +176,7 @@ const form = reactive({
   category: props.item?.category ?? '',
   description: props.item?.description ?? '',
   imageUrl: props.item?.imageUrl ?? '',
+  url: props.item?.url ?? '',
   quantity: props.item?.quantity ?? 1,
 })
 
@@ -162,6 +189,7 @@ watch(() => props.item, (newItem) => {
     form.category = newItem.category
     form.description = newItem.description
     form.imageUrl = newItem.imageUrl
+    form.url = newItem.url ?? ''
     form.quantity = newItem.quantity
   } else {
     form.name = ''
@@ -170,6 +198,7 @@ watch(() => props.item, (newItem) => {
     form.category = ''
     form.description = ''
     form.imageUrl = ''
+    form.url = ''
     form.quantity = 1
   }
 })
@@ -181,6 +210,19 @@ watch(() => props.initialBarcode, (barcode) => {
     onBarcodeLookup()
   }
 }, { immediate: true })
+
+// Amazon 商品画像URL（参考プレビュー用）
+const amazonImageUrl = ref('')
+
+// initialProduct が渡されたらフォームを自動入力
+watch(() => props.initialProduct, (product) => {
+  if (product && !product.loading && !isEdit.value) {
+    if (product.name && !form.name.trim()) form.name = product.name
+    if (product.description && !form.description.trim()) form.description = product.description
+    if (product.url && !form.url.trim()) form.url = product.url
+    if (product.imageUrl) amazonImageUrl.value = product.imageUrl
+  }
+}, { deep: true, immediate: true })
 
 async function applyLookupResult(barcode: string) {
   const result = await lookup(barcode)
