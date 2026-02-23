@@ -45,13 +45,51 @@
     />
 
     <!-- 検索結果モード -->
-    <div v-if="searchMode" class="mb-3 flex items-center gap-2">
-      <UBadge color="yellow" variant="subtle">
-        検索結果: {{ searchResults.length }}件
-      </UBadge>
-      <UButton size="xs" variant="ghost" color="gray" @click="onSearchClear">
-        戻る
-      </UButton>
+    <div v-if="searchMode" class="mb-3 space-y-2">
+      <div class="flex items-center gap-2">
+        <UBadge color="yellow" variant="subtle">
+          検索結果: {{ searchResults.length }}件
+        </UBadge>
+        <UButton size="xs" variant="ghost" color="gray" @click="onSearchClear">
+          戻る
+        </UButton>
+      </div>
+      <!-- ローカル0件時: 外部API検索 -->
+      <div v-if="searchResults.length === 0">
+        <!-- 外部API検索中 -->
+        <div v-if="lookupStatus === 'loading'" class="flex items-center gap-2 text-sm text-gray-500">
+          <UIcon name="i-heroicons-arrow-path" class="animate-spin" />
+          外部DBを検索中...
+        </div>
+        <!-- 外部API結果あり -->
+        <UCard v-else-if="externalProduct" class="mb-2">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="font-medium">{{ externalProduct.name }}</p>
+              <p v-if="externalProduct.category" class="text-sm text-gray-500">{{ externalProduct.category }}</p>
+              <p class="text-xs text-gray-400">出典: {{ externalProduct.source }}</p>
+            </div>
+            <UButton
+              size="xs"
+              icon="i-heroicons-plus"
+              @click="openCreateFormWithBarcode(lastSearchBarcode)"
+            >
+              この商品を登録
+            </UButton>
+          </div>
+        </UCard>
+        <!-- 外部APIも見つからない -->
+        <div v-else-if="lookupStatus === 'not_found' || lookupStatus === 'error'" class="flex items-center gap-2 text-sm text-gray-500">
+          <span>外部DBにも見つかりませんでした</span>
+          <UButton
+            size="xs"
+            icon="i-heroicons-plus"
+            @click="openCreateFormWithBarcode(lastSearchBarcode)"
+          >
+            手動で登録
+          </UButton>
+        </div>
+      </div>
     </div>
 
     <!-- 物品一覧 -->
@@ -77,6 +115,7 @@
         :item="editingItem"
         :parent-id="currentParentId"
         :default-owner-type="ownerType || 'org'"
+        :initial-barcode="pendingBarcode"
         @submit="onSubmitForm"
         @cancel="showForm = false"
       />
@@ -109,6 +148,7 @@ import type { Item } from '@yhonda-ohishi-pub-dev/logi-proto'
 import { AuthToolbar, useAuth } from '@yhonda-ohishi-pub-dev/auth-client'
 
 const { setOwnerType: setAuthOwnerType } = useAuth()
+const { status: lookupStatus, product: externalProduct, lookup, reset: resetLookup } = useProductLookup()
 
 const {
   items,
@@ -142,6 +182,8 @@ const deleting = ref(false)
 // 検索状態
 const searchMode = ref(false)
 const searchResults = ref<Item[]>([])
+const lastSearchBarcode = ref('')
+const pendingBarcode = ref('')
 
 const displayItems = computed(() =>
   searchMode.value ? searchResults.value : items.value
@@ -161,6 +203,15 @@ function onOwnerTypeChange(type: string) {
 
 function openCreateForm() {
   editingItem.value = null
+  pendingBarcode.value = ''
+  showForm.value = true
+}
+
+function openCreateFormWithBarcode(barcode: string) {
+  editingItem.value = null
+  searchMode.value = false
+  searchResults.value = []
+  pendingBarcode.value = barcode
   showForm.value = true
 }
 
@@ -186,6 +237,7 @@ async function onSubmitForm(data: {
     }
     showForm.value = false
     editingItem.value = null
+    pendingBarcode.value = ''
   } catch (e: any) {
     // エラーは useItems 内で処理済み
   }
@@ -211,9 +263,15 @@ async function confirmDelete() {
 }
 
 async function onBarcodeSearch(barcode: string) {
+  lastSearchBarcode.value = barcode
+  resetLookup()
   try {
     searchResults.value = await searchByBarcode(barcode)
     searchMode.value = true
+    // ローカル0件 → 外部API検索
+    if (searchResults.value.length === 0) {
+      await lookup(barcode)
+    }
   } catch (e: any) {
     // エラーは useItems 内で処理済み
   }
@@ -222,5 +280,6 @@ async function onBarcodeSearch(barcode: string) {
 function onSearchClear() {
   searchMode.value = false
   searchResults.value = []
+  resetLookup()
 }
 </script>

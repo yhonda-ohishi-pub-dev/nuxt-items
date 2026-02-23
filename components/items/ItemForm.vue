@@ -7,6 +7,65 @@
     </template>
 
     <div class="space-y-4">
+      <UFormGroup label="バーコード">
+        <div class="flex gap-2">
+          <UInput v-model="form.barcode" placeholder="バーコード（任意）" class="flex-1" @keyup.enter="onBarcodeLookup" />
+          <UButton
+            icon="i-heroicons-magnifying-glass"
+            size="sm"
+            color="gray"
+            :loading="lookupStatus === 'loading'"
+            :disabled="!form.barcode.trim()"
+            title="商品情報を検索"
+            @click="onBarcodeLookup"
+          />
+          <UButton
+            icon="i-heroicons-camera"
+            size="sm"
+            color="gray"
+            title="カメラでスキャン"
+            @click="showBarcodeScanner = true"
+          />
+        </div>
+      </UFormGroup>
+      <ItemsBarcodeScanner
+        v-model="showBarcodeScanner"
+        @scanned="onBarcodeScanned"
+      />
+
+      <!-- 商品検索ステータス -->
+      <div v-if="lookupStatus === 'loading'" class="flex items-center gap-2 text-sm text-gray-500">
+        <UIcon name="i-heroicons-arrow-path" class="animate-spin" />
+        商品情報を検索中...
+      </div>
+      <UAlert
+        v-else-if="lookupStatus === 'found'"
+        color="green"
+        variant="subtle"
+        icon="i-heroicons-check-circle"
+        title="商品情報を自動入力しました"
+        :close-button="{ icon: 'i-heroicons-x-mark', variant: 'ghost', size: '2xs' }"
+        @close="resetLookup"
+      />
+      <UAlert
+        v-else-if="lookupStatus === 'not_found'"
+        color="yellow"
+        variant="subtle"
+        icon="i-heroicons-information-circle"
+        title="商品情報が見つかりませんでした。手動で入力してください。"
+        :close-button="{ icon: 'i-heroicons-x-mark', variant: 'ghost', size: '2xs' }"
+        @close="resetLookup"
+      />
+      <UAlert
+        v-else-if="lookupStatus === 'error'"
+        color="red"
+        variant="subtle"
+        icon="i-heroicons-exclamation-triangle"
+        title="商品検索でエラーが発生しました"
+        :close-button="{ icon: 'i-heroicons-x-mark', variant: 'ghost', size: '2xs' }"
+        @close="resetLookup"
+      />
+
       <UFormGroup label="名前" required>
         <UInput v-model="form.name" placeholder="物品名を入力" />
       </UFormGroup>
@@ -27,23 +86,6 @@
       <UFormGroup label="カテゴリ">
         <UInput v-model="form.category" placeholder="カテゴリ（任意）" />
       </UFormGroup>
-
-      <UFormGroup label="バーコード">
-        <div class="flex gap-2">
-          <UInput v-model="form.barcode" placeholder="バーコード（任意）" class="flex-1" />
-          <UButton
-            icon="i-heroicons-camera"
-            size="sm"
-            color="gray"
-            title="カメラでスキャン"
-            @click="showBarcodeScanner = true"
-          />
-        </div>
-      </UFormGroup>
-      <ItemsBarcodeScanner
-        v-model="showBarcodeScanner"
-        @scanned="(code: string) => form.barcode = code"
-      />
 
       <UFormGroup label="説明">
         <UTextarea v-model="form.description" placeholder="説明（任意）" :rows="2" />
@@ -74,6 +116,7 @@ const props = defineProps<{
   item?: Item | null
   parentId?: string
   defaultOwnerType?: string
+  initialBarcode?: string
 }>()
 
 const emit = defineEmits<{
@@ -93,6 +136,8 @@ const isEdit = computed(() => !!props.item)
 const submitting = ref(false)
 const showBarcodeScanner = ref(false)
 
+const { status: lookupStatus, lookup, reset: resetLookup } = useProductLookup()
+
 const ownerTypeOptions = [
   { value: 'org', label: '組織' },
   { value: 'personal', label: '個人' },
@@ -109,6 +154,7 @@ const form = reactive({
 })
 
 watch(() => props.item, (newItem) => {
+  resetLookup()
   if (newItem) {
     form.name = newItem.name
     form.ownerType = newItem.ownerType
@@ -127,6 +173,33 @@ watch(() => props.item, (newItem) => {
     form.quantity = 1
   }
 })
+
+// initialBarcode が渡されたら自動検索
+watch(() => props.initialBarcode, (barcode) => {
+  if (barcode && !isEdit.value) {
+    form.barcode = barcode
+    onBarcodeLookup()
+  }
+}, { immediate: true })
+
+async function applyLookupResult(barcode: string) {
+  const result = await lookup(barcode)
+  if (result) {
+    if (!form.name.trim()) form.name = result.name
+    if (!form.category.trim()) form.category = result.category
+    if (!form.description.trim()) form.description = result.description
+  }
+}
+
+async function onBarcodeScanned(code: string) {
+  form.barcode = code
+  await applyLookupResult(code)
+}
+
+async function onBarcodeLookup() {
+  if (!form.barcode.trim()) return
+  await applyLookupResult(form.barcode.trim())
+}
 
 async function onSubmit() {
   if (!form.name.trim()) return
